@@ -1,81 +1,86 @@
 const User = require("../models/usermodel");
+const generateToken = require("../utils/jwt_token");
 const bcrypt = require("bcrypt");
 
-const registerLoad = async (req, res) => {
+module.exports.login = async (req, res) => {
   try {
-    res.render("register");
-  } catch (error) {
-    console.log(error.message);
-  }
-};
-
-const register = async (req, res) => {
-  try {
-    const passwordHash = await bcrypt.hash(req.body.password, 10);
-    console.log(req.file)
-    const user = new User({
-      name: req.body.name,
-      email: req.body.email,
-      image: req.body.image,
-      password: passwordHash,
-    });
-
-    await user.save();
-    res.render("register", { message: "registration succussefully completed" });
-  } catch (error) {
-    console.log(error.message);
-  }
-};
-
-const loadLogin = async (req, res) => {
-  try {
-    res.render("login");
-  } catch (error) {
-    console.log(error.message);
-  }
-};
-const login = async (req, res) => {
-  try {
-    const email = req.body.email;
-    const password = req.body.password;
-
-    const userData = await User.findOne({ email: email });
-    if (userData) {
-      const passwordMatch = await bcrypt.compare(password, userData.password);
-      if (passwordMatch) {
-        req.session.user = userData;
-        res.redirect("/dashboard");
-      } else {
-        res.render("login", { message: "Email/Password invalid" });
-      }
+    const { username, password } = req.body;
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.json({ message: "Invalid username or password" });
     } else {
-      res.render("login", { message: "Email/Password invalid" });
+      const isPasswordValid = await bcrypt.compare(
+        password,
+        user.password || ""
+      );
+      if (!isPasswordValid) {
+        return res.json({ message: "Invalid username or password" });
+      } else {
+        generateToken(user._id, res);
+        res.status(200).json({
+          _id: user._id,
+          fullName: user.fullName,
+          username: user.username,
+          avatarImage: user.avatarImage,
+        });
+      }
     }
   } catch (error) {
-    console.log(error.message);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
-const logout = async (req, res) => {
+
+module.exports.register = async (req, res) => {
   try {
-    req.session.destroy();
-    res.redirect("/");
+    const { fullName, username, email, password, confirmPassword, gender } =
+      req.body;
+
+    if (password !== confirmPassword) {
+      return res
+        .status(400)
+        .json({ error: "password and confirm password do not matched" });
+    } else {
+      const user = await User.findOne({ username });
+      if (user) {
+        return res.status(400).json({ error: "username already exits" });
+      } else {
+        const emailCheck = await User.findOne({ email });
+        if (emailCheck) {
+          return res.json({ msg: "Email already used", status: false });
+        } else {
+          const hashedPassword = await bcrypt.hash(password, 10);
+          const boyProfilePic = `https://avatar.iran.liara.run/public/boy?username=${username}`;
+          const girlProfilePic = `https://avatar.iran.liara.run/public/girl?username=${username}`;
+          const user = await User.create({
+            fullName,
+            username,
+            email,
+            password: hashedPassword,
+            gender,
+            avatarImage: gender === "male" ? boyProfilePic : girlProfilePic,
+          });
+          //Generate JWT token here
+          generateToken(user._id, res);
+          await user.save();
+          res.status(201).json({
+            _id: user._id,
+            fullName: user.fullName,
+            username: user.username,
+            avatarImage: user.avatarImage,
+          });
+        }
+      }
+    }
   } catch (error) {
-    console.log(error.message);
+    res.status(404).json({ error: "Internal server error" });
   }
 };
-const loadDashboard = async (req, res) => {
+
+module.exports.logOut = (req, res) => {
   try {
-    const users = await User.find({ _id: { $nin: [req.session.user._id] } });
-    res.render("dashboard", { user: req.session.user, users: users });
+    res.cookie("jwt", "", { maxAge: 0 });
+    res.status(200).json({ message: "logged out successfully" });
   } catch (error) {
-    console.log(error.message);
+    res.status(404).json({ error: "Internal server error" });
   }
-};
-module.exports = {
-  registerLoad,
-  loadDashboard,
-  loadLogin,
-  login,
-  logout,
-  register,
 };
